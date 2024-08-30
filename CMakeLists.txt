@@ -31,4 +31,4 @@ if (CMAKE_C_COMPILER_ID STREQUAL "GNU")
 endif()
 
 # Hardware-specific examples in subdirectories:
-add_subdirectory(freertos)
+add_subdirectory(src)
