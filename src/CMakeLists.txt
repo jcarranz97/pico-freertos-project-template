@@ -13,7 +13,7 @@ add_executable(${TARGET_NAME}
     hello_freertos.c
     )
 target_include_directories(${TARGET_NAME} PRIVATE
-    ${CMAKE_CURRENT_LIST_DIR}/
+    ${CMAKE_CURRENT_LIST_DIR}/../include/
     )
 target_link_libraries(${TARGET_NAME} PRIVATE
     pico_async_context_freertos
