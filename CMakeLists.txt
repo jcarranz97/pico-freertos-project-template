@@ -22,23 +22,6 @@ endif()
 # Initialize the SDK
 pico_sdk_init()
 
-function(add_subdirectory_exclude_platforms NAME)
-    if (ARGN)
-        if (PICO_PLATFORM IN_LIST ARGN)
-            message("Skipping ${NAME} example which is unsupported on this platform")
-            return()
-        endif()
-        foreach(PATTERN IN LISTS ARGN)
-            string(REGEX MATCH "${PATTERN}" MATCHED "${PICO_PLATFORM}")
-            if (MATCHED)
-                message("Skipping ${NAME} example which is unsupported on this platform")
-                return()
-            endif()
-        endforeach()
-    endif()
-    add_subdirectory(${NAME})
-endfunction()
-
 add_compile_options(-Wall
         -Wno-format          # int != int32_t as far as the compiler is concerned because gcc has int32_t as long int
         -Wno-unused-function # we have some for the docs that aren't called
