@@ -3,6 +3,13 @@ cmake_minimum_required(VERSION 3.12)
 # Pull in SDK (must be before project)
 include(cmake/pico_sdk_import.cmake)
 
+# Include FreeRTOS
+if (NOT FREERTOS_KERNEL_PATH AND NOT DEFINED ENV{FREERTOS_KERNEL_PATH})
+    message("Skipping FreeRTOS examples as FREERTOS_KERNEL_PATH not defined")
+    return()
+endif()
+include(cmake/FreeRTOS_Kernel_import.cmake)
+
 project(pico_examples C CXX ASM)
 
 set(CMAKE_C_STANDARD 11)
