@@ -1,6 +1,7 @@
-set(TARGET_NAME hello_freertos1)
+# TODO: Change your executable file name. Default is main
+set(TARGET_NAME main)
 add_executable(${TARGET_NAME}
-    hello_freertos.c
+    main.c
     )
 target_include_directories(${TARGET_NAME} PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/../include/

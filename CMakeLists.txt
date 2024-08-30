@@ -11,7 +11,7 @@ endif()
 include(cmake/FreeRTOS_Kernel_import.cmake)
 
 # TODO: Put your project name here
-project(freertos_pico_template C CXX ASM)
+project(pico_freertos_project_template C CXX ASM)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
