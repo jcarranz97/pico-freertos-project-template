@@ -10,7 +10,8 @@ if (NOT FREERTOS_KERNEL_PATH AND NOT DEFINED ENV{FREERTOS_KERNEL_PATH})
 endif()
 include(cmake/FreeRTOS_Kernel_import.cmake)
 
-project(pico_examples C CXX ASM)
+# TODO: Put your project name here
+project(freertos_pico_template C CXX ASM)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
