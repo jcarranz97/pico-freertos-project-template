@@ -52,14 +52,12 @@ static uint32_t blink_interval_ms = BLINK_NOT_MOUNTED;
 #define BLINK_TASK_PRIORITY     ( tskIDLE_PRIORITY + 2UL )
 #define JUST_ALIVE_TASK_PRIORITY     ( tskIDLE_PRIORITY + 2UL )
 #define HID_TASK_PRIORITY       ( tskIDLE_PRIORITY + 1UL )
-#define WORKER_TASK_PRIORITY    ( tskIDLE_PRIORITY + 4UL )
 
 // Stack sizes of our threads in words (4 bytes)
 #define MAIN_TASK_STACK_SIZE configMINIMAL_STACK_SIZE
 #define BLINK_TASK_STACK_SIZE configMINIMAL_STACK_SIZE
 #define JUST_ALIVE_TASK_STACK_SIZE configMINIMAL_STACK_SIZE
 #define HID_TASK_STACK_SIZE configMINIMAL_STACK_SIZE
-#define WORKER_TASK_STACK_SIZE configMINIMAL_STACK_SIZE
 
 static void pico_set_led(bool led_on);
 static void pico_init_led(void);
