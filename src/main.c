@@ -81,6 +81,7 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
 
 
 void main_task(__unused void *params) {
+    printf("Starting main_task!!!\n");
     // start the led blinking task
     xTaskCreate(led_blinking_task,
                 "LedBlinkingTask",
@@ -185,6 +186,7 @@ uint32_t button_read(void){
 }
 
 void led_blinking_task(__unused void *params) {
+    printf("Starting led_blinking_task!!!\n");
     static bool led_state = false;
     pico_init_led();
     while (true) {
@@ -195,11 +197,13 @@ void led_blinking_task(__unused void *params) {
 }
 
 void just_alive_task(__unused void *params) {
+    printf("Starting just_alive_task!!!\n");
     static bool led_state = false;
     pico_init_led();
     while (true) {
         gpio_put(SECONDARY_LED, led_state);
         led_state = !led_state;
+        printf("just_alive_task - Led State=%d\n", led_state);
         vTaskDelay(500);
     }
 }
