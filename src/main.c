@@ -63,6 +63,7 @@ static uint32_t blink_interval_ms = BLINK_NOT_MOUNTED;
 
 static void pico_set_led(bool led_on);
 static void pico_init_led(void);
+uint32_t button_read(void);
 void led_blinking_task(__unused void *params);
 void hid_task(__unused void *params);
 void just_alive_task(__unused void *params);
@@ -107,13 +108,11 @@ void main_task(__unused void *params) {
     // // init device stack on configured roothub port
     tud_init(BOARD_TUD_RHPORT);
 
-    int count = 0;
     if (board_init_after_tusb) {
       board_init_after_tusb();
     }
     
     while(true) {
-        // printf("Hello from main task count=%u\n", count++);
         tud_task(); // tinyusb device task
     }
 }
@@ -183,6 +182,10 @@ static void pico_init_led(void) {
     gpio_pull_up(ACTION_BUTTON);
 }
 
+uint32_t button_read(void){
+    return !gpio_get(ACTION_BUTTON);
+}
+
 void led_blinking_task(__unused void *params) {
     static bool led_state = false;
     pico_init_led();
@@ -207,7 +210,7 @@ void just_alive_task(__unused void *params) {
 void hid_task(__unused void *params){
     const uint32_t interval_ms = 10;
     while(true){
-        uint32_t const btn = !gpio_get(ACTION_BUTTON);
+        uint32_t const btn = button_read();
 
         // Remote wakeup
         if ( tud_suspended() && btn ){
@@ -361,7 +364,7 @@ void tud_hid_report_complete_cb(uint8_t instance, uint8_t const* report, uint16_
 
   if (next_report_id < REPORT_ID_COUNT)
   {
-    send_hid_report(next_report_id, !gpio_get(ACTION_BUTTON));
+    send_hid_report(next_report_id, button_read());
   }
 }
 
