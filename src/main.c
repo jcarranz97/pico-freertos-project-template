@@ -15,143 +15,107 @@
 
 #include "FreeRTOS.h"
 #include "task.h"
+#include "bsp/board_api.h"
+#include "tusb.h"
+
+#include "usb_descriptors.h"
+
 
 // Which core to run on if configNUMBER_OF_CORES==1
 #ifndef RUN_FREE_RTOS_ON_CORE
 #define RUN_FREE_RTOS_ON_CORE 0
 #endif
 
-// Whether to flash the led
-#ifndef USE_LED
-#define USE_LED 1
-#endif
+//--------------------------------------------------------------------+
+// MACRO CONSTANT TYPEDEF PROTYPES
+//--------------------------------------------------------------------+
 
-// Whether to busy wait in the led thread
-#ifndef LED_BUSY_WAIT
-#define LED_BUSY_WAIT 1
-#endif
+/* Blink pattern
+ * - 250 ms  : device not mounted
+ * - 1000 ms : device mounted
+ * - 2500 ms : device is suspended
+ */
+enum  {
+  BLINK_NOT_MOUNTED = 250,
+  BLINK_MOUNTED = 1000,
+  BLINK_SUSPENDED = 2500,
+};
 
-// Delay between led blinking
-#define LED_DELAY_MS 500
+static uint32_t blink_interval_ms = BLINK_NOT_MOUNTED;
+
+// Secondary button to confirm app is running and Action Button
+#define SECONDARY_LED     10
+#define ACTION_BUTTON     11
 
 // Priorities of our threads - higher numbers are higher priority
 #define MAIN_TASK_PRIORITY      ( tskIDLE_PRIORITY + 2UL )
-#define BLINK_TASK_PRIORITY     ( tskIDLE_PRIORITY + 1UL )
+#define BLINK_TASK_PRIORITY     ( tskIDLE_PRIORITY + 2UL )
+#define JUST_ALIVE_TASK_PRIORITY     ( tskIDLE_PRIORITY + 2UL )
+#define HID_TASK_PRIORITY       ( tskIDLE_PRIORITY + 1UL )
 #define WORKER_TASK_PRIORITY    ( tskIDLE_PRIORITY + 4UL )
 
 // Stack sizes of our threads in words (4 bytes)
 #define MAIN_TASK_STACK_SIZE configMINIMAL_STACK_SIZE
 #define BLINK_TASK_STACK_SIZE configMINIMAL_STACK_SIZE
+#define JUST_ALIVE_TASK_STACK_SIZE configMINIMAL_STACK_SIZE
+#define HID_TASK_STACK_SIZE configMINIMAL_STACK_SIZE
 #define WORKER_TASK_STACK_SIZE configMINIMAL_STACK_SIZE
 
-#include "pico/async_context_freertos.h"
-static async_context_freertos_t async_context_instance;
+static void pico_set_led(bool led_on);
+static void pico_init_led(void);
+void led_blinking_task(__unused void *params);
+void hid_task(__unused void *params);
+void just_alive_task(__unused void *params);
+//--------------------------------------------------------------------+
+// Device callbacks
+//--------------------------------------------------------------------+
+void tud_mount_cb(void);
+void tud_umount_cb(void);
+void tud_suspend_cb(bool remote_wakeup_en);
+void tud_resume_cb(void);
+//--------------------------------------------------------------------+
+// USB HID
+//--------------------------------------------------------------------+
+static void send_hid_report(uint8_t report_id, uint32_t btn);
+void tud_hid_report_complete_cb(uint8_t instance, uint8_t const* report, uint16_t len);
+void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t const* buffer, uint16_t bufsize);
 
-// Create an async context
-static async_context_t *example_async_context(void) {
-    async_context_freertos_config_t config = async_context_freertos_default_config();
-    config.task_priority = WORKER_TASK_PRIORITY; // defaults to ASYNC_CONTEXT_DEFAULT_FREERTOS_TASK_PRIORITY
-    config.task_stack_size = WORKER_TASK_STACK_SIZE; // defaults to ASYNC_CONTEXT_DEFAULT_FREERTOS_TASK_STACK_SIZE
-    if (!async_context_freertos_init(&async_context_instance, &config))
-        return NULL;
-    return &async_context_instance.core;
-}
-
-#if USE_LED
-// Turn led on or off
-static void pico_set_led(bool led_on) {
-#if defined PICO_DEFAULT_LED_PIN
-    gpio_put(PICO_DEFAULT_LED_PIN, led_on);
-#elif defined(CYW43_WL_GPIO_LED_PIN)
-    cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, led_on);
-#endif
-}
-
-// Initialise led
-static void pico_init_led(void) {
-#if defined PICO_DEFAULT_LED_PIN
-    gpio_init(PICO_DEFAULT_LED_PIN);
-    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
-#elif defined(CYW43_WL_GPIO_LED_PIN)
-    hard_assert(cyw43_arch_init() == PICO_OK);
-    pico_set_led(false); // make sure cyw43 is started
-#endif
-}
-
-void blink_task(__unused void *params) {
-    bool on = false;
-    printf("blink_task starts\n");
-    pico_init_led();
-    while (true) {
-#if configNUMBER_OF_CORES > 1
-        static int last_core_id = -1;
-        if (portGET_CORE_ID() != last_core_id) {
-            last_core_id = portGET_CORE_ID();
-            printf("blink task is on core %d\n", last_core_id);
-        }
-#endif
-        printf("Blink task - Set Led: %d\n", on);
-        pico_set_led(on);
-        on = !on;
-
-#if LED_BUSY_WAIT
-        // You shouldn't usually do this. We're just keeping the thread busy,
-        // experiment with BLINK_TASK_PRIORITY and LED_BUSY_WAIT to see what happens
-        // if BLINK_TASK_PRIORITY is higher than TEST_TASK_PRIORITY main_task won't get any free time to run
-        // unless configNUMBER_OF_CORES > 1
-        busy_wait_ms(LED_DELAY_MS);
-#else
-        sleep_ms(LED_DELAY_MS);
-#endif
-    }
-}
-#endif // USE_LED
-
-void juan_task(__unused void *params) {
-    printf("Juan Task is starting!!!\n");
-    while (true) {
-        printf("Reading sensor data!\n");
-        vTaskDelay(300);
-    }
-}
-
-// async workers run in their own thread when using async_context_freertos_t with priority WORKER_TASK_PRIORITY
-static void do_work(async_context_t *context, async_at_time_worker_t *worker) {
-    async_context_add_at_time_worker_in_ms(context, worker, 10000);
-    static uint32_t count = 0;
-    printf("Hello from worker count=%u\n", count++);
-#if configNUMBER_OF_CORES > 1
-        static int last_core_id = -1;
-        if (portGET_CORE_ID() != last_core_id) {
-            last_core_id = portGET_CORE_ID();
-            printf("worker is on core %d\n", last_core_id);
-        }
-#endif
-}
-async_at_time_worker_t worker_timeout = { .do_work = do_work };
 
 void main_task(__unused void *params) {
-    async_context_t *context = example_async_context();
-    // start the worker running
-    async_context_add_at_time_worker_in_ms(context, &worker_timeout, 0);
-#if USE_LED
-    // start the led blinking
-    xTaskCreate(blink_task, "BlinkThread", BLINK_TASK_STACK_SIZE, NULL, BLINK_TASK_PRIORITY, NULL);
-    xTaskCreate(juan_task, "JuanThread", BLINK_TASK_STACK_SIZE, NULL, BLINK_TASK_PRIORITY, NULL);
-#endif
+    // start the led blinking task
+    xTaskCreate(led_blinking_task,
+                "LedBlinkingTask",
+                BLINK_TASK_STACK_SIZE,
+                NULL,
+                BLINK_TASK_PRIORITY,
+                NULL);
+    // start the led blinking task
+    xTaskCreate(just_alive_task,
+                "JustAliveTask",
+                JUST_ALIVE_TASK_STACK_SIZE,
+                NULL,
+                JUST_ALIVE_TASK_PRIORITY,
+                NULL);
+    xTaskCreate(hid_task,
+                "HIDTask",
+                HID_TASK_STACK_SIZE,
+                NULL,
+                HID_TASK_PRIORITY,
+                NULL);
+    // USB Board init
+    board_init();
+    // // init device stack on configured roothub port
+    tud_init(BOARD_TUD_RHPORT);
+
     int count = 0;
-    while(true) {
-#if configNUMBER_OF_CORES > 1
-        static int last_core_id = -1;
-        if (portGET_CORE_ID() != last_core_id) {
-            last_core_id = portGET_CORE_ID();
-            printf("main task is on core %d\n", last_core_id);
-        }
-#endif
-        printf("Hello from main task count=%u\n", count++);
-        vTaskDelay(1000);
+    if (board_init_after_tusb) {
+      board_init_after_tusb();
     }
-    async_context_deinit(context);
+    
+    while(true) {
+        // printf("Hello from main task count=%u\n", count++);
+        tud_task(); // tinyusb device task
+    }
 }
 
 void vLaunch( void) {
@@ -191,4 +155,258 @@ int main( void )
     vLaunch();
 #endif
     return 0;
+}
+
+// Turn led on or off
+static void pico_set_led(bool led_on) {
+#if defined PICO_DEFAULT_LED_PIN
+    gpio_put(PICO_DEFAULT_LED_PIN, led_on);
+#elif defined(CYW43_WL_GPIO_LED_PIN)
+    cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, led_on);
+#endif
+}
+
+// Initialise led
+static void pico_init_led(void) {
+#if defined PICO_DEFAULT_LED_PIN
+    gpio_init(PICO_DEFAULT_LED_PIN);
+    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
+#elif defined(CYW43_WL_GPIO_LED_PIN)
+    hard_assert(cyw43_arch_init() == PICO_OK);
+    pico_set_led(false); // make sure cyw43 is started
+#endif
+    // Secondary LED
+    gpio_init(SECONDARY_LED);
+    gpio_set_dir(SECONDARY_LED, GPIO_OUT);
+    gpio_init(ACTION_BUTTON);
+    gpio_set_dir(ACTION_BUTTON, GPIO_IN);
+    gpio_pull_up(ACTION_BUTTON);
+}
+
+void led_blinking_task(__unused void *params) {
+    static bool led_state = false;
+    pico_init_led();
+    while (true) {
+        pico_set_led(led_state);
+        led_state = !led_state;
+        vTaskDelay(blink_interval_ms);
+    }
+}
+
+void just_alive_task(__unused void *params) {
+    static bool led_state = false;
+    pico_init_led();
+    while (true) {
+        gpio_put(SECONDARY_LED, led_state);
+        led_state = !led_state;
+        vTaskDelay(500);
+    }
+}
+// Every 10ms, we will sent 1 report for each HID profile (keyboard, mouse etc ..)
+// tud_hid_report_complete_cb() is used to send the next report after previous one is complete
+void hid_task(__unused void *params){
+    const uint32_t interval_ms = 10;
+    while(true){
+        uint32_t const btn = !gpio_get(ACTION_BUTTON);
+
+        // Remote wakeup
+        if ( tud_suspended() && btn ){
+          // Wake up host if we are in suspend mode
+          // and REMOTE_WAKEUP feature is enabled by host
+          tud_remote_wakeup();
+        }
+        else{
+          // Send the 1st of report chain, the rest will be sent by tud_hid_report_complete_cb()
+          send_hid_report(REPORT_ID_KEYBOARD, btn);
+        }
+        // Poll every 10ms
+        vTaskDelay(interval_ms);
+    }
+}
+
+//--------------------------------------------------------------------+
+// Device callbacks
+//--------------------------------------------------------------------+
+
+// Invoked when device is mounted
+void tud_mount_cb(void)
+{
+  blink_interval_ms = BLINK_MOUNTED;
+}
+
+// Invoked when device is unmounted
+void tud_umount_cb(void)
+{
+  blink_interval_ms = BLINK_NOT_MOUNTED;
+}
+
+// Invoked when usb bus is suspended
+// remote_wakeup_en : if host allow us  to perform remote wakeup
+// Within 7ms, device must draw an average of current less than 2.5 mA from bus
+void tud_suspend_cb(bool remote_wakeup_en)
+{
+  (void) remote_wakeup_en;
+  blink_interval_ms = BLINK_SUSPENDED;
+}
+
+// Invoked when usb bus is resumed
+void tud_resume_cb(void)
+{
+  blink_interval_ms = tud_mounted() ? BLINK_MOUNTED : BLINK_NOT_MOUNTED;
+}
+
+//--------------------------------------------------------------------+
+// USB HID
+//--------------------------------------------------------------------+
+
+static void send_hid_report(uint8_t report_id, uint32_t btn)
+{
+  // skip if hid is not ready yet
+  if ( !tud_hid_ready() ) return;
+
+  switch(report_id)
+  {
+    case REPORT_ID_KEYBOARD:
+    {
+      // use to avoid send multiple consecutive zero report for keyboard
+      static bool has_keyboard_key = false;
+
+      if ( btn )
+      {
+        uint8_t keycode[6] = { 0 };
+        keycode[0] = HID_KEY_A;
+
+        tud_hid_keyboard_report(REPORT_ID_KEYBOARD, 0, keycode);
+        has_keyboard_key = true;
+      }else
+      {
+        // send empty key report if previously has key pressed
+        if (has_keyboard_key) tud_hid_keyboard_report(REPORT_ID_KEYBOARD, 0, NULL);
+        has_keyboard_key = false;
+      }
+    }
+    break;
+
+    case REPORT_ID_MOUSE:
+    {
+      int8_t const delta = 5;
+
+      // no button, right + down, no scroll, no pan
+      tud_hid_mouse_report(REPORT_ID_MOUSE, 0x00, delta, delta, 0, 0);
+    }
+    break;
+
+    case REPORT_ID_CONSUMER_CONTROL:
+    {
+      // use to avoid send multiple consecutive zero report
+      static bool has_consumer_key = false;
+
+      if ( btn )
+      {
+        // volume down
+        uint16_t volume_down = HID_USAGE_CONSUMER_VOLUME_DECREMENT;
+        tud_hid_report(REPORT_ID_CONSUMER_CONTROL, &volume_down, 2);
+        has_consumer_key = true;
+      }else
+      {
+        // send empty key report (release key) if previously has key pressed
+        uint16_t empty_key = 0;
+        if (has_consumer_key) tud_hid_report(REPORT_ID_CONSUMER_CONTROL, &empty_key, 2);
+        has_consumer_key = false;
+      }
+    }
+    break;
+
+    case REPORT_ID_GAMEPAD:
+    {
+      // use to avoid send multiple consecutive zero report for keyboard
+      static bool has_gamepad_key = false;
+
+      hid_gamepad_report_t report =
+      {
+        .x   = 0, .y = 0, .z = 0, .rz = 0, .rx = 0, .ry = 0,
+        .hat = 0, .buttons = 0
+      };
+
+      if ( btn )
+      {
+        report.hat = GAMEPAD_HAT_UP;
+        report.buttons = GAMEPAD_BUTTON_A;
+        tud_hid_report(REPORT_ID_GAMEPAD, &report, sizeof(report));
+
+        has_gamepad_key = true;
+      }else
+      {
+        report.hat = GAMEPAD_HAT_CENTERED;
+        report.buttons = 0;
+        if (has_gamepad_key) tud_hid_report(REPORT_ID_GAMEPAD, &report, sizeof(report));
+        has_gamepad_key = false;
+      }
+    }
+    break;
+
+    default: break;
+  }
+}
+
+// Invoked when sent REPORT successfully to host
+// Application can use this to send the next report
+// Note: For composite reports, report[0] is report ID
+void tud_hid_report_complete_cb(uint8_t instance, uint8_t const* report, uint16_t len)
+{
+  (void) instance;
+  (void) len;
+
+  uint8_t next_report_id = report[0] + 1u;
+
+  if (next_report_id < REPORT_ID_COUNT)
+  {
+    send_hid_report(next_report_id, !gpio_get(ACTION_BUTTON));
+  }
+}
+
+// Invoked when received GET_REPORT control request
+// Application must fill buffer report's content and return its length.
+// Return zero will cause the stack to STALL request
+uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t* buffer, uint16_t reqlen)
+{
+  // TODO not Implemented
+  (void) instance;
+  (void) report_id;
+  (void) report_type;
+  (void) buffer;
+  (void) reqlen;
+
+  return 0;
+}
+
+// Invoked when received SET_REPORT control request or
+// received data on OUT endpoint ( Report ID = 0, Type = 0 )
+void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t const* buffer, uint16_t bufsize)
+{
+  (void) instance;
+
+  if (report_type == HID_REPORT_TYPE_OUTPUT)
+  {
+    // Set keyboard LED e.g Capslock, Numlock etc...
+    if (report_id == REPORT_ID_KEYBOARD)
+    {
+      // bufsize should be (at least) 1
+      if ( bufsize < 1 ) return;
+
+      uint8_t const kbd_leds = buffer[0];
+
+      if (kbd_leds & KEYBOARD_LED_CAPSLOCK)
+      {
+        // Capslock On: disable blink, turn led on
+        blink_interval_ms = 0;
+        board_led_write(true);
+      }else
+      {
+        // Caplocks Off: back to normal blink
+        board_led_write(false);
+        blink_interval_ms = BLINK_MOUNTED;
+      }
+    }
+  }
 }

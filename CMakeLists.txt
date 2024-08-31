@@ -41,6 +41,7 @@ endif()
 
 add_executable(${TARGET_NAME}
     src/main.c
+    src/usb_descriptors.c
     )
 target_include_directories(${TARGET_NAME} PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/include/
@@ -49,10 +50,13 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     pico_async_context_freertos
     FreeRTOS-Kernel-Heap4
     pico_stdlib
+    pico_unique_id
+    tinyusb_device
+    tinyusb_board
     )
-# Enable Serial over USB
-pico_enable_stdio_usb(${TARGET_NAME} 1)
-pico_enable_stdio_uart(${TARGET_NAME} 0)
+# Enable Serial over UART
+pico_enable_stdio_usb(${TARGET_NAME} 0)
+pico_enable_stdio_uart(${TARGET_NAME} 1)
 
 if(PICO_CYW43_SUPPORTED)
     # For led support on pico_w
